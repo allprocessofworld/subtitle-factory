@@ -17,10 +17,10 @@ export async function callGemini(prompt: string): Promise<string> {
 
   const genAI = new GoogleGenerativeAI(apiKey);
   
-  // gemini-2.0-flash: 가성비 최고 모델
+  // gemini-2.0-flash-lite-lite: 가성비 최고 모델
   // 100만 토큰당 입력 $0.10, 출력 $0.40
   const model = genAI.getGenerativeModel({ 
-    model: 'gemini-2.0-flash',
+    model: 'gemini-2.0-flash-lite-lite',
     generationConfig: {
       temperature: 0.3,        // 번역은 창의성보다 정확성 → 낮은 temperature
       maxOutputTokens: 16384,  // 60분 분량 자막 대응
