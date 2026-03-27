@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+import { authOptions } from '@/lib/auth-options';
 import { parseSrt, serializeSrt, extractTexts, parseTranslatedResponse, mapTranslatedTexts, generateSSML } from '@/lib/srt-utils';
 import { callGemini, callClaude } from '@/lib/ai-clients';
 import { getKoToEnTranslationPrompt, getEnPolishingPrompt } from '@/lib/prompts';
