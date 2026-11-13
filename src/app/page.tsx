@@ -2,7 +2,7 @@
 
 import { useSession, signIn, signOut } from 'next-auth/react';
 import { useEffect, useState } from 'react';
-import { LogOut, Subtitles, Globe, Mic, Youtube, Factory } from 'lucide-react';
+import { LogOut, Subtitles, Globe, Mic, Youtube } from 'lucide-react';
 import KoToEnTab from '@/components/KoToEnTab';
 import { MULTILINGUAL_LANGUAGES } from '@/types';
 import EnToMultiTab from '@/components/EnToMultiTab';
@@ -52,11 +52,10 @@ export default function HomePage() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-surface-50 p-4">
         <div className="card p-10 max-w-md w-full text-center">
-          <div className="w-16 h-16 bg-brand-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
-            <Factory className="w-8 h-8 text-brand-600" />
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="허슬플레이" width={695} height={254} className="h-16 w-auto mx-auto mb-6" />
           <h1 className="font-display text-3xl font-bold text-surface-900 mb-2">
-            자막 공장
+            허슬플레이 번역 웹앱
           </h1>
           <p className="text-surface-500 mb-8 text-sm leading-relaxed">
             산업 다큐멘터리 영상의<br />
@@ -95,11 +94,10 @@ export default function HomePage() {
       <header className="bg-white border-b border-surface-200 sticky top-0 z-50">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-brand-600 rounded-xl flex items-center justify-center">
-              <Factory className="w-5 h-5 text-white" />
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.png" alt="허슬플레이" width={695} height={254} className="h-8 w-auto" />
             <h1 className="font-display text-xl font-bold text-surface-900">
-              자막 공장
+              허슬플레이 번역 웹앱
             </h1>
           </div>
 
@@ -163,7 +161,7 @@ export default function HomePage() {
       {/* 푸터 */}
       <footer className="border-t border-surface-200 bg-white mt-auto">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 text-center text-xs text-surface-400">
-          자막 공장 v1.1 — AI 기반 다국어 자막 번역 & 더빙 생성 시스템
+          허슬플레이 번역 웹앱 v1.2 — AI 기반 다국어 자막 번역 & 더빙 생성 시스템
         </div>
       </footer>
     </div>
