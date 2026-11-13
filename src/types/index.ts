@@ -41,7 +41,7 @@ export interface ChunkResult {
   warning?: string;
 }
 
-/** 다국어 목록 (34개 언어) */
+/** 자막 다국어 번역 목록 — YouTube 스튜디오 번역 언어 목록과 같은 순서 (원본 한국어·영어 제외) */
 export const MULTILINGUAL_LANGUAGES = [
   { code: 'el', name: '그리스어', nameEn: 'Greek' },
   { code: 'nl', name: '네덜란드어', nameEn: 'Dutch' },
@@ -70,14 +70,30 @@ export const MULTILINGUAL_LANGUAGES = [
   { code: 'te', name: '텔루구어', nameEn: 'Telugu' },
   { code: 'tr', name: '튀르키예어', nameEn: 'Turkish' },
   { code: 'pa', name: '펀자브어', nameEn: 'Punjabi' },
+  { code: 'pt-PT', name: '포르투갈어', nameEn: 'European Portuguese (as spoken in Portugal, not Brazilian)' },
+  { code: 'pt-BR', name: '포르투갈어(브라질)', nameEn: 'Brazilian Portuguese (as spoken in Brazil)' },
   { code: 'pl', name: '폴란드어', nameEn: 'Polish' },
-  { code: 'pt', name: '포르투갈어', nameEn: 'Portuguese' },
   { code: 'fr', name: '프랑스어', nameEn: 'French' },
   { code: 'fi', name: '핀란드어', nameEn: 'Finnish' },
   { code: 'fil', name: '필리핀어', nameEn: 'Filipino' },
   { code: 'hu', name: '헝가리어', nameEn: 'Hungarian' },
   { code: 'hi', name: '힌디어', nameEn: 'Hindi' },
 ] as const;
+
+/**
+ * YouTube 제목·설명 번역 목록 — 자막 번역 언어 + 영어(미국)·한국어
+ * (YouTube 스튜디오 '언어' 화면과 같은 37개, 같은 순서)
+ */
+export const YOUTUBE_LANGUAGES = [
+  ...MULTILINGUAL_LANGUAGES.slice(0, MULTILINGUAL_LANGUAGES.findIndex((l) => l.code === 'ur')),
+  { code: 'en-US', name: '영어(미국)', nameEn: 'American English' },
+  ...MULTILINGUAL_LANGUAGES.slice(
+    MULTILINGUAL_LANGUAGES.findIndex((l) => l.code === 'ur'),
+    MULTILINGUAL_LANGUAGES.findIndex((l) => l.code === 'hu')
+  ),
+  { code: 'ko', name: '한국어', nameEn: 'Korean' },
+  ...MULTILINGUAL_LANGUAGES.slice(MULTILINGUAL_LANGUAGES.findIndex((l) => l.code === 'hu')),
+];
 
 /** 더빙 음성 샘플레이트 (ElevenLabs pcm_24000 — 모든 유료 요금제에서 사용 가능) */
 export const DUBBING_SAMPLE_RATE = 24000;

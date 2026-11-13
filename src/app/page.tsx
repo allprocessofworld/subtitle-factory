@@ -4,13 +4,14 @@ import { useSession, signIn, signOut } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 import { LogOut, Subtitles, Globe, Mic, Youtube, Factory } from 'lucide-react';
 import KoToEnTab from '@/components/KoToEnTab';
+import { MULTILINGUAL_LANGUAGES } from '@/types';
 import EnToMultiTab from '@/components/EnToMultiTab';
 import DubbingTab from '@/components/DubbingTab';
 import YouTubeTab from '@/components/YouTubeTab';
 
 const TABS = [
   { id: 'ko-to-en', label: '한→영 번역', icon: Subtitles, desc: 'SRT + 더빙대본' },
-  { id: 'en-to-multi', label: '다국어 번역', icon: Globe, desc: '34개 언어' },
+  { id: 'en-to-multi', label: '다국어 번역', icon: Globe, desc: `${MULTILINGUAL_LANGUAGES.length}개 언어` },
   { id: 'dubbing', label: '더빙 생성', icon: Mic, desc: '6개 언어 TTS' },
   { id: 'youtube', label: 'YouTube 번역', icon: Youtube, desc: '제목/설명' },
 ] as const;

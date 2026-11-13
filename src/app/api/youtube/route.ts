@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { callGemini } from '@/lib/ai-clients';
 import { getYouTubeTranslationPrompt } from '@/lib/prompts';
-import { MULTILINGUAL_LANGUAGES } from '@/types';
+import { YOUTUBE_LANGUAGES } from '@/types';
 import { requireSession, readJson, errorResponse, HttpError } from '@/lib/server-utils';
 
 export const maxDuration = 60;
@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
       const description = typeof body.description === 'string' ? body.description.slice(0, 10000) : '';
       if (!title && !description) throw new HttpError(400, '번역할 제목/설명이 없습니다.');
 
-      const lang = MULTILINGUAL_LANGUAGES.find((l) => l.code === body.languageCode);
+      const lang = YOUTUBE_LANGUAGES.find((l) => l.code === body.languageCode);
       if (!lang) throw new HttpError(400, `지원하지 않는 언어 코드: ${body.languageCode}`);
 
       const prompt = getYouTubeTranslationPrompt(title, description, lang.nameEn, lang.code);
