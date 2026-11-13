@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Upload, FileText, AlertCircle, AlertTriangle, Loader2, BookOpen } from 'lucide-react';
+import { Upload, FileText, AlertCircle, AlertTriangle, Loader2, BookOpen, Clock } from 'lucide-react';
+import { RATE_LIMIT_EVENT } from '@/lib/client-utils';
 
 const MAX_FILE_BYTES = 1024 * 1024; // 1MB
 
@@ -85,6 +86,7 @@ export function ProgressBox({ label, done, total, tone = 'blue' }: {
   tone?: 'blue' | 'violet';
 }) {
   const pct = total ? Math.round(((done || 0) / total) * 100) : null;
+  const waitSeconds = useRateLimitCountdown();
   const color = tone === 'violet'
     ? { bg: 'bg-violet-50', text: 'text-violet-700', icon: 'text-violet-600', bar: 'bg-violet-500' }
     : { bg: 'bg-blue-50', text: 'text-blue-700', icon: 'text-blue-600', bar: 'bg-blue-500' };
@@ -95,6 +97,12 @@ export function ProgressBox({ label, done, total, tone = 'blue' }: {
         <p className={`text-sm ${color.text} flex-1`}>{label}</p>
         {pct !== null && <span className={`text-sm font-medium ${color.text}`}>{pct}%</span>}
       </div>
+      {waitSeconds > 0 && (
+        <p className="mt-2 flex items-center gap-2 text-xs text-amber-700">
+          <Clock className="w-3.5 h-3.5" />
+          API 요청 한도에 걸려 대기 중 — 약 {waitSeconds}초 후 자동으로 이어서 진행합니다.
+        </p>
+      )}
       {pct !== null && (
         <div className="mt-3 h-1.5 bg-white rounded-full overflow-hidden">
           <div className={`h-full ${color.bar} transition-all duration-300`} style={{ width: `${pct}%` }} />
@@ -102,6 +110,25 @@ export function ProgressBox({ label, done, total, tone = 'blue' }: {
       )}
     </div>
   );
+}
+
+/** 요청 한도 대기 남은 초 (없으면 0) */
+function useRateLimitCountdown(): number {
+  const [until, setUntil] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const onLimit = (e: Event) => {
+      const detail = (e as CustomEvent<{ until: number }>).detail;
+      setUntil((prev) => Math.max(prev, detail.until));
+    };
+    window.addEventListener(RATE_LIMIT_EVENT, onLimit);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => {
+      window.removeEventListener(RATE_LIMIT_EVENT, onLimit);
+      clearInterval(timer);
+    };
+  }, []);
+  return Math.max(0, Math.ceil((until - now) / 1000));
 }
 
 export function ErrorBox({ message }: { message: string }) {

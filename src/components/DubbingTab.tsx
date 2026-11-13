@@ -2,13 +2,15 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Upload, FileText, Download, Loader2, CheckCircle2, Mic, Volume2, RotateCcw, Square } from 'lucide-react';
-import { DUBBING_LANGUAGES, DUBBING_SAMPLE_RATE, SrtBlock } from '@/types';
+import { DUBBING_LANGUAGES, DUBBING_MP3_KBPS, DUBBING_SAMPLE_RATE, MP3_DELAY_SAMPLES, SrtBlock } from '@/types';
 import { parseSrt, parseTimecodeRange } from '@/lib/srt-utils';
-import { downloadBlob, encodeWav, formatSeconds, postForBinary, readSubtitleFile, runPool } from '@/lib/client-utils';
+import {
+  downloadBlob, encodeMp3, encodeWav, formatSeconds, getJson, postForBinary, readSubtitleFile, runPool,
+} from '@/lib/client-utils';
 import { ProgressBox, WarningBox, formatBlockNumbers } from '@/components/shared';
 
-/** ElevenLabs 동시 요청 수 (Starter 요금제 동시 처리 한도 3) */
-const CONCURRENCY = 3;
+/** 요금제 확인 전 기본 동시 처리 수 (서버가 ElevenLabs 요금제를 확인해 덮어씀) */
+const DEFAULT_CONCURRENCY = 5;
 /** 이 이상 뒤로 밀리면 "싱크 밀림"으로 보고 */
 const DRIFT_TOLERANCE_SEC = 0.15;
 
@@ -19,17 +21,22 @@ interface LangState {
 }
 
 interface DubbingResult {
-  url: string;
-  blob: Blob;
-  filename: string;
+  /** MP3 (기본 다운로드·미리듣기) */
+  mp3: Blob;
+  mp3Url: string;
+  /** 파일 이름 (확장자 제외) */
+  baseName: string;
   duration: number;
   failed: number[]; // 음성 생성 실패한 블록 인덱스 (무음 처리됨)
   drifted: number; // 자막 시작 시점보다 늦게 시작한 블록 수
   maxDrift: number; // 최대 밀림(초)
 }
 
-/** 블록별 음성을 타임코드 위치에 배치해 하나의 PCM 트랙으로 합침 */
-function assembleTimeline(blocks: SrtBlock[], clips: (Int16Array | null)[]) {
+/**
+ * 블록별 음성을 타임코드 위치에 배치해 하나의 PCM 트랙으로 합침.
+ * trimStart: 맨 앞에서 잘라낼 샘플 수 (MP3 인코더 지연 보정용, 첫 음성 앞 무음 범위 안에서만)
+ */
+function assembleTimeline(blocks: SrtBlock[], clips: (Int16Array | null)[], trimStart = 0) {
   const sr = DUBBING_SAMPLE_RATE;
   const placements: { at: number; clip: Int16Array }[] = [];
   let cursor = 0; // 앞 음성이 끝난 시점(초)
@@ -54,9 +61,11 @@ function assembleTimeline(blocks: SrtBlock[], clips: (Int16Array | null)[]) {
   });
 
   const totalSec = Math.max(cursor, lastEnd) + 0.5;
-  const out = new Int16Array(Math.ceil(totalSec * sr));
+  const firstSample = placements.length ? Math.round(placements[0].at * sr) : 0;
+  const trim = Math.min(trimStart, firstSample);
+  const out = new Int16Array(Math.ceil(totalSec * sr) - trim);
   for (const { at, clip } of placements) {
-    out.set(clip, Math.round(at * sr));
+    out.set(clip, Math.round(at * sr) - trim);
   }
   return { samples: out, duration: totalSec, drifted, maxDrift };
 }
@@ -64,7 +73,8 @@ function assembleTimeline(blocks: SrtBlock[], clips: (Int16Array | null)[]) {
 export default function DubbingTab() {
   const [langs, setLangs] = useState<Record<string, LangState>>({});
   const [isLoading, setIsLoading] = useState(false);
-  const [processing, setProcessing] = useState<{ code: string; done: number; total: number } | null>(null);
+  const [processing, setProcessing] = useState<{ code: string; phase: 'tts' | 'mp3'; done: number; total: number } | null>(null);
+  const [plan, setPlan] = useState<{ tier: string | null; concurrency: number } | null>(null);
   const [results, setResults] = useState<Record<string, DubbingResult>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const clipsRef = useRef<Record<string, (Int16Array | null)[]>>({});
@@ -73,6 +83,14 @@ export default function DubbingTab() {
 
   // 탭을 벗어나면 오디오 메모리 해제
   useEffect(() => () => urlsRef.current.forEach((u) => URL.revokeObjectURL(u)), []);
+
+  // ElevenLabs 요금제에 맞는 동시 처리 수 조회
+  useEffect(() => {
+    getJson<{ tier: string | null; concurrency: number }>('/api/dubbing')
+      .then(setPlan)
+      .catch(() => setPlan(null));
+  }, []);
+  const concurrency = plan?.concurrency ?? DEFAULT_CONCURRENCY;
 
   const setLangError = (code: string, message?: string) =>
     setErrors((prev) => {
@@ -118,7 +136,7 @@ export default function DubbingTab() {
 
     const indices = onlyIndices ?? blocks.map((_, i) => i);
     let done = 0;
-    setProcessing({ code, done: 0, total: indices.length });
+    setProcessing({ code, phase: 'tts', done: 0, total: indices.length });
 
     const outcomes = await runPool(
       indices.map((i) => async () => {
@@ -130,9 +148,9 @@ export default function DubbingTab() {
         });
         clips[i] = new Int16Array(buf, 0, Math.floor(buf.byteLength / 2));
         done++;
-        setProcessing({ code, done, total: indices.length });
+        setProcessing({ code, phase: 'tts', done, total: indices.length });
       }),
-      CONCURRENCY,
+      concurrency,
       signal
     );
 
@@ -143,16 +161,23 @@ export default function DubbingTab() {
       throw new Error(firstError && !firstError.ok ? firstError.error.message : '더빙 생성 실패');
     }
 
-    const { samples, duration, drifted, maxDrift } = assembleTimeline(blocks, clips);
-    const blob = encodeWav(samples, DUBBING_SAMPLE_RATE);
-    const url = URL.createObjectURL(blob);
-    urlsRef.current.push(url);
+    // 타임라인 정보 계산 후 MP3로 변환 (WAV는 다운로드 시에만 생성 — 메모리 절약)
+    const { duration, drifted, maxDrift } = assembleTimeline(blocks, clips);
+    setProcessing({ code, phase: 'mp3', done: 0, total: 100 });
+    const mp3 = await encodeMp3(
+      () => assembleTimeline(blocks, clips, MP3_DELAY_SAMPLES).samples,
+      DUBBING_SAMPLE_RATE,
+      DUBBING_MP3_KBPS,
+      (value) => setProcessing({ code, phase: 'mp3', done: Math.round(value * 100), total: 100 })
+    );
+    const mp3Url = URL.createObjectURL(mp3);
+    urlsRef.current.push(mp3Url);
 
     setResults((prev) => {
-      if (prev[code]) URL.revokeObjectURL(prev[code].url);
+      if (prev[code]) URL.revokeObjectURL(prev[code].mp3Url);
       return {
         ...prev,
-        [code]: { url, blob, filename: `${lang.name}.wav`, duration, failed: failedAll, drifted, maxDrift },
+        [code]: { mp3, mp3Url, baseName: lang.name, duration, failed: failedAll, drifted, maxDrift },
       };
     });
 
@@ -181,6 +206,13 @@ export default function DubbingTab() {
     abortRef.current = null;
   };
 
+  /** 무압축 WAV — 요청 시에만 생성 */
+  const downloadWav = (code: string) => {
+    const { blocks } = langs[code];
+    const { samples } = assembleTimeline(blocks, clipsRef.current[code] || []);
+    downloadBlob(encodeWav(samples, DUBBING_SAMPLE_RATE), `${results[code].baseName}.wav`);
+  };
+
   const assignedCodes = DUBBING_LANGUAGES.map((l) => l.code).filter((c) => langs[c]);
   const totalChars = assignedCodes.reduce((s, c) => s + langs[c].charCount, 0);
   const processingName = processing ? DUBBING_LANGUAGES.find((l) => l.code === processing.code)?.name : '';
@@ -198,7 +230,7 @@ export default function DubbingTab() {
             <h2 className="font-display text-lg font-bold text-surface-900 mb-1">다국어 더빙 생성 (6개 언어)</h2>
             <p className="text-sm text-surface-500 leading-relaxed">
               각 언어별 자막(.srt)을 업로드하면 <strong>ElevenLabs</strong> TTS로 자막 한 줄씩 음성을 만들어{' '}
-              <strong>각 자막의 타임코드 위치에 배치</strong>한 WAV 파일 한 개를 생성합니다. 편집 타임라인
+              <strong>각 자막의 타임코드 위치에 배치</strong>한 MP3 파일 한 개를 생성합니다(무압축 WAV도 선택 가능). 편집 타임라인
               0초 지점에 놓으면 영상과 싱크가 맞습니다. 음성이 자막 구간보다 길면 다음 줄이 그만큼 뒤로 밀리며, 결과에
               표시됩니다.
             </p>
@@ -258,7 +290,8 @@ export default function DubbingTab() {
 
         {assignedCodes.length > 0 && (
           <p className="mt-4 text-xs text-surface-400">
-            총 {totalChars.toLocaleString()}자 — ElevenLabs 크레딧이 글자 수만큼 차감됩니다.
+            총 {totalChars.toLocaleString()}자 — ElevenLabs 크레딧이 글자 수만큼 차감됩니다. · 동시 처리 {concurrency}줄
+            {plan?.tier ? ` (ElevenLabs ${plan.tier} 요금제 기준)` : ''}
           </p>
         )}
 
@@ -287,7 +320,11 @@ export default function DubbingTab() {
         {isLoading && processing && (
           <ProgressBox
             tone="violet"
-            label={`${processingName} 더빙 생성 중... (${processing.done}/${processing.total}줄) — 60분 분량은 언어당 수 분이 걸릴 수 있습니다.`}
+            label={
+              processing.phase === 'mp3'
+                ? `${processingName} MP3 변환 중...`
+                : `${processingName} 더빙 생성 중... (${processing.done}/${processing.total}줄) — 60분 분량은 언어당 수 분이 걸릴 수 있습니다.`
+            }
             done={processing.done}
             total={processing.total}
           />
@@ -312,17 +349,27 @@ export default function DubbingTab() {
                     <Volume2 className="w-5 h-5 text-violet-500 flex-shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-surface-800">
-                        {r.filename}{' '}
+                        {r.baseName}.mp3{' '}
                         <span className="text-xs font-normal text-surface-400">
-                          길이 {formatSeconds(r.duration)} · {(r.blob.size / 1024 / 1024).toFixed(1)}MB
+                          길이 {formatSeconds(r.duration)} · {(r.mp3.size / 1024 / 1024).toFixed(1)}MB
                         </span>
                       </p>
-                      <audio controls preload="none" className="w-full mt-2 h-8" src={r.url} />
+                      <audio controls preload="none" className="w-full mt-2 h-8" src={r.mp3Url} />
                     </div>
-                    <button onClick={() => downloadBlob(r.blob, r.filename)} className="btn-secondary text-sm">
-                      <Download className="w-4 h-4" />
-                      다운로드
-                    </button>
+                    <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                      <button onClick={() => downloadBlob(r.mp3, `${r.baseName}.mp3`)} className="btn-secondary text-sm">
+                        <Download className="w-4 h-4" />
+                        MP3 다운로드
+                      </button>
+                      <button
+                        onClick={() => downloadWav(code)}
+                        disabled={isLoading}
+                        className="text-xs text-surface-400 hover:text-surface-600"
+                        title="무압축 원본 (용량 큼, 60분 약 170MB)"
+                      >
+                        WAV(무압축)로 받기
+                      </button>
+                    </div>
                   </div>
 
                   {(r.failed.length > 0 || r.drifted > 0) && (

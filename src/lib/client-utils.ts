@@ -33,21 +33,52 @@ async function readError(response: Response): Promise<string> {
 }
 
 /** 일시적 오류(429/5xx/네트워크)는 자동 재시도하는 fetch */
+/** 요청 한도(429)에 걸렸을 때 최대 재시도 횟수 — 무료 등급 API 키도 시간이 걸릴 뿐 끝까지 처리되도록 넉넉하게 */
+const RATE_LIMIT_ATTEMPTS = 12;
+
+/** 요청 한도 대기 안내 이벤트 (진행률 상자에 "N초 후 자동 재시도" 표시) */
+export const RATE_LIMIT_EVENT = 'subtitle-factory:rate-limit';
+
+function notifyRateLimit(seconds: number) {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(RATE_LIMIT_EVENT, { detail: { seconds, until: Date.now() + seconds * 1000 } }));
+  }
+}
+
+/**
+ * 일시적 오류는 자동 재시도하는 fetch.
+ * - 429(요청 한도): 서버가 알려준 Retry-After 만큼 기다린 뒤 재시도 (최대 RATE_LIMIT_ATTEMPTS회)
+ * - 502/503/504·네트워크 오류: 지수 백오프로 attempts회까지
+ * - 500 등: 서버가 이미 내부 재시도 후 낸 확정 오류 → 재시도하지 않음
+ */
 async function fetchWithRetry(url: string, init: RequestInit, attempts: number): Promise<Response> {
-  let lastError: unknown;
-  for (let i = 0; i < attempts; i++) {
+  let transientTries = 0;
+  let rateLimitTries = 0;
+  for (;;) {
+    let waitMs: number;
     try {
       const response = await fetch(url, init);
-      // 일시적 오류만 재시도 (500은 서버가 이미 내부 재시도 후 낸 확정 오류)
-      const retryable = [429, 502, 503, 504].includes(response.status);
-      if (response.ok || !retryable || i === attempts - 1) return response;
-    } catch (error) {
-      lastError = error;
-      if (i === attempts - 1) throw new RequestError(0, '네트워크 연결을 확인해주세요.');
+      if (response.status === 429) {
+        rateLimitTries++;
+        if (rateLimitTries >= RATE_LIMIT_ATTEMPTS) return response;
+        const retryAfter = parseFloat(response.headers.get('Retry-After') || '');
+        const seconds = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter, 90) : 5 * rateLimitTries;
+        notifyRateLimit(seconds);
+        waitMs = seconds * 1000 + Math.random() * 2000;
+      } else if ([502, 503, 504].includes(response.status)) {
+        transientTries++;
+        if (transientTries >= attempts) return response;
+        waitMs = 2000 * 2 ** (transientTries - 1) + Math.random() * 1000;
+      } else {
+        return response;
+      }
+    } catch {
+      transientTries++;
+      if (transientTries >= attempts) throw new RequestError(0, '네트워크 연결을 확인해주세요.');
+      waitMs = 2000 * 2 ** (transientTries - 1) + Math.random() * 1000;
     }
-    await sleep(2000 * 2 ** i + Math.random() * 1000);
+    await sleep(waitMs);
   }
-  throw lastError;
 }
 
 /** JSON POST → data 반환. 실패 시 RequestError */
@@ -165,4 +196,53 @@ export function formatSeconds(sec: number): string {
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/** JSON GET → data 반환 */
+export async function getJson<T>(url: string): Promise<T> {
+  const response = await fetchWithRetry(url, { method: 'GET' }, 2);
+  if (!response.ok) throw new RequestError(response.status, await readError(response));
+  const data = await response.json();
+  if (!data?.success) throw new RequestError(response.status, data?.error || '요청이 실패했습니다.');
+  return data.data as T;
+}
+
+/**
+ * PCM → MP3 변환. Web Worker에서 처리하고(화면 멈춤 없음), Worker를 쓸 수 없으면 화면 스레드에서 처리.
+ * makeSamples: 변환할 PCM을 만드는 함수 (Worker로 메모리를 넘기므로, 대체 경로에서 다시 만들 때 사용)
+ */
+export async function encodeMp3(
+  makeSamples: () => Int16Array,
+  sampleRate: number,
+  kbps: number,
+  onProgress?: (value: number) => void
+): Promise<Blob> {
+  if (typeof Worker !== 'undefined') {
+    try {
+      return await new Promise<Blob>((resolve, reject) => {
+        const worker = new Worker(new URL('./mp3.worker.ts', import.meta.url));
+        worker.onmessage = (e: MessageEvent) => {
+          const msg = e.data;
+          if (msg.type === 'progress') onProgress?.(msg.value);
+          else if (msg.type === 'done') {
+            worker.terminate();
+            resolve(msg.blob as Blob);
+          } else if (msg.type === 'error') {
+            worker.terminate();
+            reject(new Error(msg.message));
+          }
+        };
+        worker.onerror = (e) => {
+          worker.terminate();
+          reject(new Error(e.message || 'MP3 변환 Worker 오류'));
+        };
+        const samples = makeSamples();
+        worker.postMessage({ samples, sampleRate, kbps }, [samples.buffer]);
+      });
+    } catch (error) {
+      console.warn('[MP3 Worker 실패 — 화면 스레드에서 변환]', error);
+    }
+  }
+  const { encodePcmToMp3 } = await import('@/lib/mp3-encode');
+  return encodePcmToMp3(makeSamples(), sampleRate, kbps, onProgress);
 }

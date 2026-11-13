@@ -13,7 +13,8 @@ export const MAX_CHARS_PER_REQUEST = 30000;
 export const MAX_GLOSSARY_CHARS = 5000;
 
 export class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  /** retryAfter: 요청 한도 초과 시 다시 시도할 때까지 기다릴 초 */
+  constructor(public status: number, message: string, public retryAfter?: number) {
     super(message);
   }
 }
@@ -28,7 +29,9 @@ export async function requireSession() {
 /** 공통 오류 응답 */
 export function errorResponse(error: any, logLabel: string) {
   if (error instanceof HttpError) {
-    return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+    const headers: Record<string, string> = {};
+    if (error.retryAfter) headers['Retry-After'] = String(Math.ceil(error.retryAfter));
+    return NextResponse.json({ success: false, error: error.message }, { status: error.status, headers });
   }
   console.error(`[${logLabel}]`, error);
   return NextResponse.json(
@@ -100,6 +103,8 @@ export async function runNumberedTask(
         if (retryTexts[j]) texts[originalIndex] = retryTexts[j];
       });
     } catch (error) {
+      // 요청 한도 초과는 그대로 올려 브라우저가 대기 후 재시도하게 함
+      if (error instanceof HttpError && error.status === 429) throw error;
       console.error('[누락 줄 재요청 실패]', error);
     }
     missing = texts.map((t, i) => (t ? -1 : i)).filter((i) => i >= 0);

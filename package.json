@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
+    "@breezystack/lamejs": "^1.2.7",
     "@google/generative-ai": "^0.24.0",
     "jszip": "^3.10.1",
     "lucide-react": "^0.469.0",

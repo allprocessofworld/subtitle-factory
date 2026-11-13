@@ -82,6 +82,15 @@ export const MULTILINGUAL_LANGUAGES = [
 /** 더빙 음성 샘플레이트 (ElevenLabs pcm_24000 — 모든 유료 요금제에서 사용 가능) */
 export const DUBBING_SAMPLE_RATE = 24000;
 
+/** 더빙 MP3 비트레이트 (24kHz 모노 음성 기준 방송 품질 — 60분 약 43MB) */
+export const DUBBING_MP3_KBPS = 96;
+
+/**
+ * MP3 인코더/디코더가 앞에 붙이는 지연(약 45ms @24kHz)을 ffmpeg로 실측한 값.
+ * 앞쪽 무음에서 이만큼 잘라내 MP3로 재생해도 자막 타임코드와 싱크가 맞도록 보정한다.
+ */
+export const MP3_DELAY_SAMPLES = 1076;
+
 /** 더빙 지원 6개국 언어 + Voice ID 매핑 */
 export const DUBBING_LANGUAGES = [
   { code: 'da', name: '덴마크어', nameEn: 'Danish', voiceId: 'ygiXC2Oa1BiHksD3WkJZ' },

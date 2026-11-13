@@ -88,7 +88,8 @@ export async function POST(request: NextRequest) {
       let parsed: any;
       try {
         parsed = parseJsonObject(await callGemini(prompt, { json: true }));
-      } catch {
+      } catch (error) {
+        if (error instanceof HttpError) throw error; // 요청 한도 등은 그대로 전달
         // JSON이 깨진 경우 1회 재시도
         parsed = parseJsonObject(await callGemini(prompt, { json: true }));
       }
