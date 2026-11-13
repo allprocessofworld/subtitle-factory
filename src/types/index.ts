@@ -12,51 +12,7 @@ export interface SrtBlock {
   text: string;
 }
 
-/** 번역 작업 요청 */
-export interface TranslationRequest {
-  /** 원본 SRT 파일 내용 (텍스트) */
-  srtContent: string;
-  /** 원본 언어 */
-  sourceLanguage: string;
-  /** 대상 언어 */
-  targetLanguage: string;
-  /** 번역 유형 */
-  type: 'ko-to-en' | 'en-to-multi';
-}
-
-/** 번역 결과 */
-export interface TranslationResult {
-  /** 번역된 SRT 파일 내용 */
-  translatedSrt: string;
-  /** SSML 내용 (영어 번역 시에만) */
-  ssml?: string;
-  /** 언어 코드 */
-  language: string;
-  /** 한국어 파일명 */
-  filename: string;
-}
-
-/** 더빙 요청 */
-export interface DubbingRequest {
-  /** SRT 파일 내용 */
-  srtContent: string;
-  /** 언어 코드 */
-  language: string;
-  /** ElevenLabs Voice ID */
-  voiceId: string;
-}
-
-/** YouTube 메타데이터 */
-export interface YouTubeMetadata {
-  /** 영상 제목 */
-  title: string;
-  /** 영상 설명 */
-  description: string;
-  /** 썸네일 URL */
-  thumbnailUrl?: string;
-}
-
-/** 다국어 번역 결과 */
+/** 다국어 번역 결과 (YouTube 제목/설명) */
 export interface MultiLanguageResult {
   /** 언어 코드 */
   languageCode: string;
@@ -75,14 +31,14 @@ export interface ApiResponse<T> {
   error?: string;
 }
 
-/** 작업 진행 상태 */
-export interface TaskProgress {
-  /** 현재 단계 설명 */
-  stage: string;
-  /** 전체 대비 진행률 (0~100) */
-  progress: number;
-  /** 현재 처리 중인 언어 */
-  currentLanguage?: string;
+/** 자막 구간 번역 API 응답 */
+export interface ChunkResult {
+  /** 입력과 같은 순서의 결과 (누락된 줄은 빈 문자열) */
+  texts: string[];
+  /** 결과가 빠진 줄의 인덱스 (0부터) */
+  missing: number[];
+  /** 부분 실패 등 안내 메시지 */
+  warning?: string;
 }
 
 /** 다국어 목록 (34개 언어) */
@@ -122,6 +78,9 @@ export const MULTILINGUAL_LANGUAGES = [
   { code: 'hu', name: '헝가리어', nameEn: 'Hungarian' },
   { code: 'hi', name: '힌디어', nameEn: 'Hindi' },
 ] as const;
+
+/** 더빙 음성 샘플레이트 (ElevenLabs pcm_24000 — 모든 유료 요금제에서 사용 가능) */
+export const DUBBING_SAMPLE_RATE = 24000;
 
 /** 더빙 지원 6개국 언어 + Voice ID 매핑 */
 export const DUBBING_LANGUAGES = [

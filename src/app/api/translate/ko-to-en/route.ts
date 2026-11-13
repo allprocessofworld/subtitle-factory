@@ -1,83 +1,68 @@
 // ============================================
-// API: 한국어 → 영어 번역 + SSML 생성
+// API: 한국어 → 영어 번역 (자막 한 구간 단위)
 // ============================================
-// 2단계 파이프라인:
-// 1단계: Gemini로 1차 번역 (정확한 기술 용어)
-// 2단계: Claude로 영어 폴리싱 (자연스러운 표현)
+// 브라우저가 SRT를 구간(최대 150줄)으로 나눠 여러 번 호출한다 → 서버 시간 제한에 걸리지 않음.
+// 1단계: Gemini 1차 번역 (정확한 기술 용어)
+// 2단계: Claude 폴리싱 (한국어 원문 + 1차 번역을 함께 보고 자연스러운 영어로)
+// Claude 단계가 실패한 줄은 Gemini 1차 번역으로 대체한다.
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth-options';
-import { parseSrt, serializeSrt, extractTexts, parseTranslatedResponse, mapTranslatedTexts, generateSSML } from '@/lib/srt-utils';
 import { callGemini, callClaude } from '@/lib/ai-clients';
 import { getKoToEnTranslationPrompt, getEnPolishingPrompt } from '@/lib/prompts';
+import {
+  requireSession, readJson, validateTexts, optionalString, optionalContext,
+  runNumberedTask, errorResponse, MAX_GLOSSARY_CHARS,
+} from '@/lib/server-utils';
 
-export const maxDuration = 300; // Vercel Pro: 최대 5분 (무료는 60초)
+export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   try {
-    // 1. 인증 확인
-    const session = await getServerSession(authOptions);
-    if (!session) {
-      return NextResponse.json({ success: false, error: '로그인이 필요합니다.' }, { status: 401 });
+    await requireSession();
+    const body = await readJson(request);
+    const texts = validateTexts(body.texts);
+    const glossary = optionalString(body.glossary, MAX_GLOSSARY_CHARS);
+    const contextBefore = optionalContext(body.contextBefore);
+
+    // 1단계 — Gemini 1차 번역
+    const draft = await runNumberedTask(
+      texts,
+      (numbered) => getKoToEnTranslationPrompt(numbered, glossary, contextBefore),
+      (prompt) => callGemini(prompt)
+    );
+
+    // 2단계 — Claude 폴리싱 (1차 번역이 있는 줄만)
+    let polished: string[] = draft.texts.slice();
+    let polishWarning: string | undefined;
+    const polishIdx = draft.texts.map((t, i) => (t ? i : -1)).filter((i) => i >= 0);
+
+    if (polishIdx.length > 0) {
+      const paired = polishIdx.map((i) => `KO: ${texts[i]}\n    EN: ${draft.texts[i]}`);
+      try {
+        const result = await runNumberedTask(
+          paired,
+          (numbered) => getEnPolishingPrompt(numbered, glossary, contextBefore),
+          (prompt) => callClaude(prompt)
+        );
+        polishIdx.forEach((originalIndex, j) => {
+          if (result.texts[j]) polished[originalIndex] = result.texts[j];
+        });
+        if (result.missing.length > 0) {
+          polishWarning = `${result.missing.length}줄은 Claude 폴리싱이 빠져 1차 번역을 사용했습니다.`;
+        }
+      } catch (error: any) {
+        // Claude 장애 시 전체 실패 대신 1차 번역으로 진행
+        console.error('[Claude 폴리싱 실패 — 1차 번역 사용]', error);
+        polishWarning = `Claude 폴리싱 실패로 이 구간은 Gemini 1차 번역을 사용했습니다. (${error.message})`;
+        polished = draft.texts.slice();
+      }
     }
-
-    // 2. 요청 데이터 파싱
-    const formData = await request.formData();
-    const file = formData.get('srtFile') as File;
-    
-    if (!file) {
-      return NextResponse.json({ success: false, error: 'SRT 파일이 필요합니다.' }, { status: 400 });
-    }
-
-    // 3. 파일 크기 검증 (최대 1MB)
-    if (file.size > 1024 * 1024) {
-      return NextResponse.json({ success: false, error: '파일 크기가 1MB를 초과합니다.' }, { status: 400 });
-    }
-
-    const srtContent = await file.text();
-    const blocks = parseSrt(srtContent);
-
-    if (blocks.length === 0) {
-      return NextResponse.json({ success: false, error: 'SRT 파일을 파싱할 수 없습니다. 형식을 확인해주세요.' }, { status: 400 });
-    }
-
-    // 4. 텍스트 추출
-    const textsForTranslation = extractTexts(blocks);
-
-    // 5. 1단계 — Gemini로 1차 번역 (기술 용어 정확성)
-    const geminiPrompt = getKoToEnTranslationPrompt(textsForTranslation);
-    const rawTranslation = await callGemini(geminiPrompt);
-
-    // 6. 2단계 — Claude로 폴리싱 (자연스러운 영어)
-    const polishPrompt = getEnPolishingPrompt(rawTranslation);
-    const polishedTranslation = await callClaude(polishPrompt);
-
-    // 7. 번역 결과를 SRT 블록에 매핑
-    const translatedTexts = parseTranslatedResponse(polishedTranslation, blocks.length);
-    const translatedBlocks = mapTranslatedTexts(blocks, translatedTexts);
-
-    // 8. 영어 SRT 파일 생성
-    const translatedSrt = serializeSrt(translatedBlocks);
-
-    // 9. SSML 생성 (ElevenLabs 더빙용)
-    const ssml = generateSSML(translatedBlocks);
 
     return NextResponse.json({
       success: true,
-      data: {
-        translatedSrt,
-        ssml,
-        blockCount: blocks.length,
-        srtFilename: '영어.srt',
-        ssmlFilename: '영어_더빙용.ssml',
-      },
+      data: { texts: polished, missing: draft.missing, warning: polishWarning },
     });
-  } catch (error: any) {
-    console.error('[KO→EN 번역 오류]', error);
-    return NextResponse.json(
-      { success: false, error: error.message || '번역 중 오류가 발생했습니다.' },
-      { status: 500 }
-    );
+  } catch (error) {
+    return errorResponse(error, 'KO→EN 번역 오류');
   }
 }

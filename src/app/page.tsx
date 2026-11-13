@@ -1,7 +1,7 @@
 'use client';
 
 import { useSession, signIn, signOut } from 'next-auth/react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { LogOut, Subtitles, Globe, Mic, Youtube, Factory } from 'lucide-react';
 import KoToEnTab from '@/components/KoToEnTab';
 import EnToMultiTab from '@/components/EnToMultiTab';
@@ -9,7 +9,7 @@ import DubbingTab from '@/components/DubbingTab';
 import YouTubeTab from '@/components/YouTubeTab';
 
 const TABS = [
-  { id: 'ko-to-en', label: '한→영 번역', icon: Subtitles, desc: 'SRT + SSML' },
+  { id: 'ko-to-en', label: '한→영 번역', icon: Subtitles, desc: 'SRT + 더빙대본' },
   { id: 'en-to-multi', label: '다국어 번역', icon: Globe, desc: '34개 언어' },
   { id: 'dubbing', label: '더빙 생성', icon: Mic, desc: '6개 언어 TTS' },
   { id: 'youtube', label: 'YouTube 번역', icon: Youtube, desc: '제목/설명' },
@@ -20,6 +20,19 @@ type TabId = (typeof TABS)[number]['id'];
 export default function HomePage() {
   const { data: session, status } = useSession();
   const [activeTab, setActiveTab] = useState<TabId>('ko-to-en');
+  const [authError, setAuthError] = useState('');
+
+  // 로그인 거부(허용 목록에 없는 계정 등) 시 NextAuth가 ?error=... 로 돌려보냄
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get('error');
+    if (!code) return;
+    setAuthError(
+      code === 'AccessDenied'
+        ? '접속이 허용되지 않은 계정입니다. 관리자에게 이메일 등록을 요청해주세요.'
+        : '로그인 중 오류가 발생했습니다. 다시 시도해주세요.'
+    );
+    window.history.replaceState(null, '', window.location.pathname);
+  }, []);
 
   // ---- 로딩 중 ----
   if (status === 'loading') {
@@ -63,6 +76,9 @@ export default function HomePage() {
             </svg>
             Google 계정으로 로그인
           </button>
+          {authError && (
+            <p className="mt-4 text-sm text-red-600 bg-red-50 rounded-xl p-3">{authError}</p>
+          )}
           <p className="text-xs text-surface-400 mt-4">
             회사 멤버 전용 — 등록된 이메일만 접속 가능
           </p>
@@ -146,7 +162,7 @@ export default function HomePage() {
       {/* 푸터 */}
       <footer className="border-t border-surface-200 bg-white mt-auto">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 text-center text-xs text-surface-400">
-          자막 공장 v1.0 — AI 기반 다국어 자막 번역 & 더빙 생성 시스템
+          자막 공장 v1.1 — AI 기반 다국어 자막 번역 & 더빙 생성 시스템
         </div>
       </footer>
     </div>

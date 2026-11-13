@@ -6,17 +6,22 @@
 
 | # | 기능 | 설명 |
 |---|------|------|
-| 1 | **한→영 번역** | 한국어 SRT → 영어 SRT + SSML (Gemini 1차번역 → Claude 폴리싱) |
-| 2 | **다국어 번역** | 영어 SRT → 34개 언어 SRT (문장 압축 후 번역) |
-| 3 | **더빙 생성** | 6개국 SRT → MP3 더빙 (ElevenLabs TTS) |
+| 1 | **한→영 번역** | 한국어 SRT → 영어 SRT + ElevenLabs용 더빙 대본 (Gemini 1차번역 → Claude 폴리싱, 용어집 지원) |
+| 2 | **다국어 번역** | 영어 SRT → 34개 언어 SRT (문장 압축 후 번역, 용어집 지원, 실패 언어만 재시도) |
+| 3 | **더빙 생성** | 6개국 SRT → **타임코드에 맞춘** WAV 더빙 (ElevenLabs TTS, 자막 줄별 생성 후 배치) |
 | 4 | **YouTube 번역** | YouTube URL → 제목/설명 34개 언어 번역 + 복사 버튼 |
+
+### 처리 방식
+- 모든 작업은 브라우저가 자막을 구간(60~80줄)으로 나눠 서버에 동시에 요청합니다. 요청 하나가 짧아서 **Vercel 시간 제한에 걸리지 않고**, 진행률이 표시되며, 실패한 구간·언어만 다시 시도할 수 있습니다.
+- AI 응답에서 빠진 줄은 자동으로 한 번 더 요청하고, 그래도 빠지면 **화면에 자막 번호와 함께 경고**합니다 (조용히 원문이 섞이지 않음).
+- 더빙은 각 자막 줄의 음성을 해당 타임코드 위치에 배치한 WAV 1개로 출력합니다(24kHz/모노). 편집 타임라인 0초에 놓으면 영상과 싱크가 맞습니다. 음성이 자막 구간보다 길면 다음 줄이 밀리며, 몇 줄이 몇 초 밀렸는지 표시됩니다.
 
 ## 💰 예상 비용 (20분 영상 1편 기준)
 
-- 한→영 번역: **약 $0.15** (Gemini + Claude)
+- 한→영 번역: **약 $0.15~0.30** (Gemini + Claude Sonnet 5.5)
 - 34개 언어 번역: **약 $0.30** (Gemini)
 - YouTube 번역: **약 $0.10** (Gemini)
-- 더빙: ElevenLabs 요금제에 따라 다름
+- 더빙: ElevenLabs 요금제에 따라 다름 (글자 수만큼 크레딧 차감 — 화면에 총 글자 수 표시)
 
 ## 🚀 배포 가이드 (완전 초보용)
 
@@ -115,11 +120,11 @@ npm run dev
 - Google Cloud Console → OAuth 2.0 클라이언트 ID → 승인된 리디렉션 URI에 추가:
   `https://subtitle-factory.vercel.app/api/auth/callback/google`
 
-### ⚠️ Vercel 무료 플랜 제한
+### ⚠️ 참고: 요청 한도
 
-- 서버리스 함수 타임아웃: **60초** (34개 언어 번역 시 시간 초과 가능)
-- **해결 방법**: Vercel Pro ($20/월) 가입 시 **300초**로 연장
-- 또는: 번역 언어를 5~10개씩 나눠서 실행
+- 작업을 짧은 요청 여러 개로 나눠 처리하므로 Vercel 무료 플랜에서도 시간 초과 없이 동작하도록 설계했습니다.
+- **Gemini 무료 등급 API 키는 분당 요청 수가 매우 적어** 34개 언어 번역 시 '요청 한도 초과'가 날 수 있습니다. 유료(결제 등록) 키를 권장합니다.
+- **ElevenLabs**는 요금제별 동시 요청 수 제한이 있어 더빙은 동시에 3줄씩 생성합니다.
 
 ## 📁 프로젝트 구조
 
@@ -130,9 +135,10 @@ subtitle-factory/
 │   │   ├── api/
 │   │   │   ├── auth/[...nextauth]/route.ts  # Google 로그인
 │   │   │   ├── translate/
-│   │   │   │   ├── ko-to-en/route.ts        # 한→영 번역 API
-│   │   │   │   └── en-to-multi/route.ts     # 다국어 번역 API
-│   │   │   ├── dubbing/route.ts             # 더빙 생성 API
+│   │   │   │   ├── ko-to-en/route.ts        # 한→영 번역 API (구간 단위)
+│   │   │   │   ├── compress/route.ts        # 영어 압축 API (구간 단위)
+│   │   │   │   └── en-to-multi/route.ts     # 다국어 번역 API (언어 × 구간 단위)
+│   │   │   ├── dubbing/route.ts             # 더빙 API (자막 한 줄 → PCM 음성)
 │   │   │   └── youtube/route.ts             # YouTube 번역 API
 │   │   ├── layout.tsx
 │   │   ├── page.tsx                         # 메인 페이지
@@ -141,11 +147,15 @@ subtitle-factory/
 │   │   ├── AuthProvider.tsx
 │   │   ├── KoToEnTab.tsx                    # 한→영 탭
 │   │   ├── EnToMultiTab.tsx                 # 다국어 탭
-│   │   ├── DubbingTab.tsx                   # 더빙 탭
-│   │   └── YouTubeTab.tsx                   # YouTube 탭
+│   │   ├── DubbingTab.tsx                   # 더빙 탭 (타임코드 배치 → WAV)
+│   │   ├── YouTubeTab.tsx                   # YouTube 탭
+│   │   └── shared.tsx                       # 공통 UI (업로드, 진행률, 용어집)
 │   ├── lib/
-│   │   ├── ai-clients.ts                   # Gemini/Claude API 래퍼
+│   │   ├── ai-clients.ts                   # Gemini/Claude API 래퍼 (재시도 포함)
 │   │   ├── prompts.ts                      # AI 프롬프트 템플릿
+│   │   ├── server-utils.ts                 # API 공통 (인증, 입력 검증, 누락 줄 재요청)
+│   │   ├── chunked-translate.ts            # 브라우저: 구간 분할 병렬 요청
+│   │   ├── client-utils.ts                 # 브라우저: 요청/재시도/다운로드/WAV
 │   │   └── srt-utils.ts                    # SRT 파싱 유틸리티
 │   └── types/
 │       └── index.ts                        # TypeScript 타입 정의
@@ -160,9 +170,9 @@ subtitle-factory/
 | 영역 | 기술 | 선택 이유 |
 |------|------|----------|
 | 프레임워크 | Next.js 14 | 프론트+백엔드 올인원, 배포 최적화 |
-| 1차 번역 | Gemini 2.0 Flash | 가성비 최고 ($0.10/1M 입력) |
-| 영어 폴리싱 | Claude Sonnet 4.6 | 문체 유창함 1위 |
-| 다국어 번역 | Gemini 2.0 Flash | 대량 처리에 적합한 저비용 |
+| 1차 번역 | Gemini 2.5 Flash-Lite | 가성비 최고 ($0.10/1M 입력) |
+| 영어 폴리싱 | Claude Sonnet 5.5 | 자연스러운 영어 문체 |
+| 다국어 번역 | Gemini 2.5 Flash-Lite | 대량 처리에 적합한 저비용 |
 | 더빙 | ElevenLabs | 다국어 TTS 품질 최고 |
 | 인증 | NextAuth.js | Google OAuth 연동 간편 |
 | 스타일링 | Tailwind CSS | 빠른 UI 구축 |
@@ -176,7 +186,10 @@ A: 20분 영상 1편 기준 전체 번역(한→영 + 34개 언어) 약 $0.50 �
 A: 한→영은 Gemini로 정확한 기술 용어를 잡고, Claude로 원어민 수준으로 다듬어 전문 번역가 수준입니다.
 
 **Q: 로그인 허용 멤버를 추가하려면?**
-A: `.env.local`의 `ALLOWED_EMAILS`에 이메일 추가 후 재배포하면 됩니다.
+A: Vercel 환경변수 `ALLOWED_EMAILS`에 이메일 추가 후 재배포하면 됩니다. (비워두면 아무도 로그인할 수 없습니다)
+
+**Q: 용어집은 어떻게 쓰나요?**
+A: 번역 탭의 '용어집'에 한 줄에 하나씩 입력합니다. 한→영은 `사출 성형 = injection molding`, 다국어는 영어 용어만 적습니다. 마지막 입력값은 브라우저에 저장됩니다.
 
 **Q: 파일명이 영어로 나와요**
-A: 모든 파일명은 한국어로 생성됩니다 (예: `그리스어.srt`, `덴마크어.mp3`).
+A: 모든 파일명은 한국어로 생성됩니다 (예: `그리스어.srt`, `덴마크어.wav`).
