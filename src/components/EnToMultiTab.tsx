@@ -166,7 +166,7 @@ export default function EnToMultiTab() {
             <Globe className="w-5 h-5 text-emerald-600" />
           </div>
           <div>
-            <h2 className="font-display text-lg font-bold text-surface-900 mb-1">영어 → 다국어 번역 (34개 언어)</h2>
+            <h2 className="font-display text-lg font-bold text-surface-900 mb-1">영어 → 다국어 번역 ({MULTILINGUAL_LANGUAGES.length}개 언어)</h2>
             <p className="text-sm text-surface-500 leading-relaxed">
               영어 자막(.srt)을 업로드하면 다국어 번역 시 글자 수 초과를 방지하기 위해 먼저{' '}
               <strong>영어 문장을 압축</strong>한 후, 선택한 언어들로 번역합니다. 언어별로 따로 처리되므로

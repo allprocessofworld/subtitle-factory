@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { Search, Loader2, CheckCircle2, Youtube, Copy, Check, Globe, RotateCcw, XCircle, Square } from 'lucide-react';
-import { MULTILINGUAL_LANGUAGES, MultiLanguageResult } from '@/types';
+import { YOUTUBE_LANGUAGES, MultiLanguageResult } from '@/types';
 import { postJson, runPool } from '@/lib/client-utils';
 import { ErrorBox, ProgressBox, WarningBox } from '@/components/shared';
 
@@ -91,7 +91,7 @@ export default function YouTubeTab() {
     }
   };
 
-  const entries = MULTILINGUAL_LANGUAGES.filter((l) => outcomes[l.code]);
+  const entries = YOUTUBE_LANGUAGES.filter((l) => outcomes[l.code]);
   const doneCount = entries.filter((l) => outcomes[l.code].status !== 'running').length;
   const failedCodes = entries.filter((l) => outcomes[l.code].status === 'failed').map((l) => l.code);
   const successCount = entries.filter((l) => outcomes[l.code].status === 'done').length;
@@ -107,7 +107,8 @@ export default function YouTubeTab() {
           <div>
             <h2 className="font-display text-lg font-bold text-surface-900 mb-1">YouTube 제목/설명 다국어 번역</h2>
             <p className="text-sm text-surface-500 leading-relaxed">
-              YouTube URL을 입력하면 제목과 설명을 자동으로 가져온 후, 34개 언어로 번역합니다. 각 언어별{' '}
+              YouTube URL을 입력하면 제목과 설명을 자동으로 가져온 후, YouTube 스튜디오 언어 목록과 같은{' '}
+              {YOUTUBE_LANGUAGES.length}개 언어(영어·한국어 포함)로 번역합니다. 각 언어별{' '}
               <strong>복사 버튼</strong>으로 유튜브 스튜디오에 바로 붙여넣을 수 있습니다.
             </p>
           </div>
@@ -154,7 +155,7 @@ export default function YouTubeTab() {
               </button>
             )}
             <button
-              onClick={() => translate(MULTILINGUAL_LANGUAGES.map((l) => l.code))}
+              onClick={() => translate(YOUTUBE_LANGUAGES.map((l) => l.code))}
               disabled={isLoading}
               className="btn-primary"
             >
@@ -166,7 +167,7 @@ export default function YouTubeTab() {
               ) : (
                 <>
                   <Globe className="w-4 h-4" />
-                  34개 언어로 번역
+                  {YOUTUBE_LANGUAGES.length}개 언어로 번역
                 </>
               )}
             </button>
